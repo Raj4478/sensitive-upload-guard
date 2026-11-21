@@ -1,129 +1,110 @@
 # Architecture
 
-## 1. The core question: where can a prompt or upload be stopped?
+## 1. Constraint and approach
 
-The data has to be checked **before it is transmitted**, and **Cancel must leave the web app working** (the user can edit and resend). That rules out most places:
+The application must be a **standalone desktop application**: no browser extension, plugin or add-on, not even as a helper. It must still see a prompt or a file **before it is transmitted**, ask in a **native dialog**, and **recolour AI responses** inside two web apps running in an ordinary browser.
 
-| Interception point | Sees content before sending? | Can cancel cleanly? | Verdict |
-| --- | --- | --- | --- |
-| Network proxy / TLS interception (e.g. mitmproxy) | Only by installing a root certificate and decrypting all traffic | No. Blocking a request after the page sent it leaves the app in an error state, and ChatGPT may clear the composer | Rejected: invasive, fragile, poor UX |
-| OS-level hooks (keyboard / clipboard / file dialogs) | Partly: it can't tell "typing" from "sending", or which site a file goes to | No | Rejected |
-| **Inside the page** (browser extension content script) | **Yes.** It sees the exact text in the prompt box and the exact `File` objects at the moment of sending | **Yes.** It simply doesn't let the event through, so the page never knows | **Chosen, as a thin sensor only** |
+| Approach | Before transmission? | Native dialog? | Recolour pages? | Verdict |
+| --- | --- | --- | --- | --- |
+| Browser extension | yes | via a helper | yes | **Not allowed** by the brief |
+| OS input hooks + UI Automation (keyboard, mouse, accessibility tree) | partly (misses drag-and-drop and paste; can't read files reliably) | yes | **no** | Rejected |
+| App-controlled browser (DevTools protocol) | yes | yes | yes | Rejected: only in a browser window the app starts, and it's code injected into the page |
+| **Local inspecting proxy** | **yes: every byte the browser sends** | **yes** | **yes: stylesheet added in transit** | **Chosen** |
 
-The brief also asks for a **desktop application** with a **native dialog**. A web page can only show HTML popups, so the decision-making half has to be a desktop program. The two halves talk over **Chrome Native Messaging**, the browser's built-in, supported channel between an extension and a local app.
+A local proxy is how enterprise DLP products inspect traffic to AI services. Everything the browser sends to the two sites passes through the desktop app, which can read it, hold it, and then forward or refuse it.
 
 ## 2. Components
 
 ```mermaid
 flowchart LR
-  subgraph Browser["Chrome / Edge / Brave tab: chatgpt.com, perplexity.ai"]
-    PH[page_hook.js<br/>MAIN world]
-    CS[content.js<br/>sensor: holds and replays events]
-    CSS[responses.css<br/>recolours AI answers]
+  B[Browser<br/>Chrome / Edge / Firefox] -- "PAC: only the 2 sites<br/>+ their upload storage" --> P
+  subgraph App["Upload Guard desktop app (one Python process)"]
+    UI[app.py<br/>Tk window: setup, on/off,<br/>colour, activity]
+    P[proxy_server.py<br/>mitmproxy engine, 127.0.0.1]
+    A[addon.py<br/>decrypt? inspect? hold?]
+    PL[payload.py<br/>JSON / form / multipart / raw]
+    D[decisions.py<br/>one dialog per submission,<br/>approved-text memory]
+    I[inspector / extractors / ocr<br/>text, PDF, images, scans]
+    DLG[dialog.py + taskdialog.py<br/>native Continue / Cancel]
+    PAC[pac.py<br/>proxy auto-config server]
+    S[system.py<br/>certificate + routing, user-started]
+    C[ca.py<br/>local CA, unique per PC]
   end
-  BG[background.js<br/>service worker relay]
-  subgraph Desktop["upload_guard (Python desktop app)"]
-    H[host.py<br/>native-messaging protocol + policy]
-    I[inspector.py / detector.py<br/>marker matching]
-    X[extractors.py<br/>text, PDF, image]
-    O[ocr.py<br/>Windows.Media.Ocr / Vision / tesseract]
-    D[dialog.py<br/>Win32 MessageBox / osascript / zenity]
-    A[(audit.log)]
-  end
-  CS -- chrome.runtime.sendMessage --> BG
-  BG -- sendNativeMessage<br/>4-byte length + JSON on stdin/stdout --> H
-  H --> I --> X --> O
-  H --> D
-  H --> A
+  P --> A --> PL
+  A --> I
+  A --> D --> DLG
+  A -- forward or 403 --> W[chatgpt.com · perplexity.ai · storage]
+  UI --> S
+  UI --> PAC
+  P --> C
 ```
 
-| Part | Job |
+| Module | Job |
 | --- | --- |
-| `extension/content.js` | Capture-phase listeners on `window`, registered at `document_start`, so they run before the site's own code. Holds prompt sends (Enter, Send button, form submit) and uploads (file input, drop, paste); replays or drops them |
-| `extension/page_hook.js` | Runs in the page's own JS world. Attaches a *detached* `<input type=file>` to the page right before its picker opens, so its events can be seen |
-| `extension/responses.css` | Recolours AI answers using stable `data-` attributes (ChatGPT `data-message-role="assistant"`, Perplexity `data-renderer="lm"` outside the user's message bubble) |
-| `extension/background.js` | Relays requests to the native host. Only content scripts can't call native messaging directly. Rejects senders other than the two sites |
-| `upload_guard/host.py` | Reads Chrome's message format, runs inspection, applies the policy, shows the dialog, writes the audit log |
-| `upload_guard/extractors.py` | Detects the file type from its first bytes (not its name) and extracts text: decoded text, the PDF text layer (OCR for scanned pages) and image OCR plus metadata |
-| `upload_guard/ocr.py` | The operating system's own OCR: `Windows.Media.Ocr` via PowerShell, the macOS Vision framework via JXA, `tesseract` as fallback |
-| `upload_guard/dialog.py`, `taskdialog.py` | Native Continue/Cancel dialog. On Windows: a **Task Dialog**, the modern native dialog Windows uses for its own security prompts (warning banner, heading, two command-link buttons with explanations, live auto-cancel countdown), loaded from Common Controls v6 through a runtime activation context. It falls back to `MessageBoxTimeoutW` with the OK button renamed to "Continue". Topmost; Cancel is the default button |
-| `upload_guard/installer.py` | Registers the host for Chrome, Edge, Brave and Chromium (HKCU registry on Windows, `NativeMessagingHosts` folders elsewhere). Only the extension's fixed ID is allowed |
+| `app.py` | The desktop window. It starts the engine, walks through the two setup steps (each user-started and reversible), sets the response colour, and shows live activity and counts. Closing it turns routing off. |
+| `proxy_server.py` | Runs mitmproxy (TLS, HTTP/1.1, HTTP/2, WebSockets) on its own asyncio thread |
+| `addon.py` | The guard. `tls_clienthello` decides which connections to decrypt; `request` inspects and holds sends and uploads; `response` learns upload hosts and file names and adds the colour stylesheet |
+| `payload.py` | Turns a request body into "prompt text" and "files" (JSON, form-encoded, multipart, raw upload) |
+| `decisions.py` | One dialog per submission, shared by duplicate requests; remembers approved text so tracking beacons repeating it can pass; records the audit log |
+| `inspector.py`, `extractors.py`, `ocr.py`, `detector.py` | Marker detection in text, PDFs (text layer and scanned pages) and images (OS OCR), tolerant of OCR and PDF noise |
+| `dialog.py`, `taskdialog.py` | Native dialog: Windows Task Dialog (MessageBox fallback), macOS `display dialog`, Linux `zenity` |
+| `pac.py` | Serves the proxy auto-config file that routes only the protected sites to the proxy |
+| `system.py` | Certificate install/remove (CurrentUser root store / login keychain) and per-user PAC routing on/off, restoring the previous value |
+| `ca.py` | Creates the local CA ("Upload Guard local inspection CA") once per PC |
+| `browser.py` | "Open protected browser": a separate profile that uses the proxy and trusts only this CA's public key, with no system change |
 
-## 3. Prompt interception
+## 3. What gets decrypted
+
+1. **Routing (PAC):** the browser asks the PAC file about every host. It answers "the local proxy" only for `chatgpt.com`, `chat.openai.com`, `perplexity.ai` and the storage domains they upload to; everything else is `DIRECT` and never reaches Upload Guard.
+2. **Decryption (per connection):** in `tls_clienthello` the add-on looks at the server name. It decrypts only the protected sites, storage hosts that look like theirs, and storage hosts **a protected site named in a response** (an upload URL), which it learns at runtime. Everything else routed to it passes through still encrypted.
+
+## 4. Request lifecycle
 
 ```mermaid
 sequenceDiagram
-  participant U as User
-  participant P as Page (ChatGPT/Perplexity)
-  participant C as content.js
-  participant H as Desktop app
-  U->>C: Enter / click Send (capture phase, before the page)
-  alt no marker (local check, same rules as the desktop app)
-    C-->>P: event untouched, page sends as usual
-  else WALLED_SENSITIVE found
-    C->>C: preventDefault + stopImmediatePropagation (page sees nothing)
-    C->>H: inspect_prompt {site, text}
-    H->>U: native dialog "text prompt ... ChatGPT", prompt text
+  participant B as Browser
+  participant P as Upload Guard proxy
+  participant U as User (native dialog)
+  participant S as ChatGPT / Perplexity
+  B->>P: POST send (prompt) or upload (file bytes)
+  P->>P: parse body: prompt text? files?<br/>inspect files: text / PDF / OCR
+  alt nothing sensitive
+    P->>S: forward unchanged (no delay you can notice)
+  else marker found
+    P->>U: native dialog (prompt text, or file name, type, where found)
     alt Continue
-      H-->>C: continue
-      C->>P: replay: click the site's own Send button (hooks paused)
-    else Cancel
-      H-->>C: cancel
-      C->>U: text stays in the box (toast: "Prompt not sent")
+      P->>S: forward the original bytes
+      S-->>B: normal response
+    else Cancel (or 120 s timeout)
+      P-->>B: 403 "Blocked by Upload Guard" (answered locally)
+      Note over B: the request never left the PC;<br/>the site keeps the text in the box
     end
   end
 ```
 
-- **Clean prompts are never delayed.** The extension checks locally with exactly the same rules as `detector.py`, and only calls the desktop app when the marker is present.
-- **Replay** uses the site's own Send button (falling back to `form.requestSubmit()`, then a synthetic Enter). The prompt is sent byte-for-byte as typed: nothing in the composer is modified.
-- While a dialog is open, further send attempts are swallowed, so a double Enter can't sneak a prompt through.
-
-## 4. File interception
-
-Every upload path converges on the same check:
-
-| Path | Hooked event | Replay on Continue | On Cancel |
-| --- | --- | --- | --- |
-| File picker | `input` + `change` on `<input type=file>` (both held) | dispatch `input` + `change` again; the `FileList` is kept | `input.value = ''` (user can pick again) |
-| Several files | same | replay with a new `FileList` of the allowed files only | flagged files removed |
-| Drag and drop | `drop` | new `DragEvent('drop')` with the allowed files on the same target | `dragleave` to clear the drop overlay |
-| Paste (screenshots) | `paste` with files | new `ClipboardEvent('paste')` with the allowed files plus the original text data | nothing pasted |
-
-Each file is read in the page (`FileReader`), sent to the desktop app as base64, and inspected:
-
-1. **Type from content.** The first bytes decide the type (`%PDF-`, PNG/JPEG/GIF/BMP/TIFF/WebP signatures), so a renamed file is still read correctly.
-2. **Text:** UTF-8, UTF-16 (BOM) or Latin-1.
-3. **PDF:** the text layer per page via `pypdf`. A page with almost no text is treated as scanned, and its embedded images are OCR'd. Document properties (title, keywords) are checked too.
-4. **Image:** OCR with the OS engine, plus printable metadata (PNG text chunks, EXIF comments).
-5. **Matching:** both sides are folded to a canonical form (upper case; OCR look-alikes `0→O 1→I 5→S`; non-letters removed), so `WALLED SENSITIVE`, a marker split over two lines, and `WA11ED_SENS1TIVE` all match. Near misses (`WALLED` alone, `WALLED_SENSITIV`) don't.
-
-The dialog names the file, its type and where the marker was found ("page 2", "image text (OCR)"), with the matching line.
+- **Prompts:** both sites send the new message in a `POST`, and the proxy reads it before forwarding. Discovery on the live sites found ChatGPT's send endpoint (`/unauth-mweb/conversation/updates` logged out, `/backend-api/f/conversation` logged in) and Perplexity's (`/rest/sse/perplexity_ask`, field `query_str`). The add-on doesn't depend on these paths: any send to the site carrying the marker is held.
+- **Files** travel in one of two ways, and both are covered. **Multipart** posts carry the file name in each part. **Raw uploads** to cloud storage carry no name, so the add-on uses the name the site announced just before (`{"file_name": …, "file_size": …}`), matched by upload URL or size, so the dialog can show the real file name.
+- **Duplicates:** a single send can produce several requests with the same text. They all wait for **one** dialog. After it closes, a duplicate within ~1 to 3 s reuses the answer; a later resend is a new attempt and gets a new dialog, so Cancel never blocks a deliberate retry.
+- **Tracking beacons:** discovery showed Perplexity's analytics beacon repeating the prompt text. Tracking requests never open a dialog. They wait while a dialog is open on that site, and then go through **only if the same text was approved**; otherwise they're dropped (204). A cancelled prompt can't leak through telemetry.
 
 ## 5. Response recolouring
 
-`responses.css` is injected into both sites. It's active while `<html>` has the class `upload-guard-color`, and takes its colour from a CSS variable set from the popup's settings. Selectors target **stable data attributes**, not the generated class names both sites use:
+As the two sites' HTML pages pass through the proxy, the add-on inserts one `<style>` block before `</head>`. Both sites serve their HTML with `no-store`, so every page load is recoloured. It targets stable `data-` attributes: ChatGPT `[data-message-role="assistant"] [data-assistant-markdown-root]`, and Perplexity `[data-renderer="lm"]` *excluding* `[data-message-bubble]`, because Perplexity renders the user's own question with the same renderer. If a page's Content-Security-Policy restricted inline styles, the add-on would add exactly this block's SHA-256 hash to `style-src`. Neither site does so today, and a hash is never added next to `'unsafe-inline'`, where it would disable the site's own inline styles.
 
-- **ChatGPT:** `[data-message-role="assistant"] [data-assistant-markdown-root]` (2026 layout) and `[data-message-author-role="assistant"] .markdown` (earlier layout).
-- **Perplexity:** `[data-renderer="lm"]`, excluding `[data-message-bubble]`, because Perplexity renders the user's own question with the same renderer.
-
-CSS is applied instantly to every message, including ones that stream in later, with no DOM polling and no effect on page scripts.
-
-## 6. Reliability and failure handling
+## 6. Failure handling
 
 | Situation | Behaviour |
 | --- | --- |
-| Desktop app not installed / crashed | Fail-closed by default: flagged prompts and uploads are blocked with an on-page notice. Switchable to fail-open in the popup |
-| Dialog left unanswered | Auto-**Cancel** after 120 s (configurable) |
-| Supported file can't be read (password-protected PDF, OCR unavailable) | User is asked ("File could not be checked"); `unreadable_policy` can make that allow/block |
-| Unsupported file type (zip, docx…) | Not in scope; passes through untouched |
-| File over 50 MB | Not sent for inspection; treated as "could not be checked" |
-| Malformed native message | Reported as an error reply; the host keeps running |
-| Extension reloaded while a page is open | The old content script's calls fail, which is treated as "app not reachable" (fail-closed) |
+| Dialog unanswered | Cancel after 120 s (configurable) |
+| Supported file can't be read (password-protected PDF, OCR failure, missing Pillow) | Recorded as "could not be checked" and the user is asked (`unreadable_policy`); never treated as clean |
+| Unsupported file type (zip, docx…) | Out of scope; forwarded |
+| Upload Guard stops while routing is on | The two sites don't load (no DIRECT fallback in the PAC): fail closed. Closing the app normally restores the previous proxy setting. |
+| Upstream certificate invalid | The connection fails as it would without Upload Guard (upstream verification stays on) |
+| Several files or prompts at once | Each waits independently; dialogs can be answered in any order |
 
-## 7. Security notes
+## 7. Security
 
-- The native host accepts messages **only from this extension's fixed ID** (`allowed_origins`). The service worker also rejects any sender that isn't one of the two sites or its own popup.
-- Nothing leaves the machine: inspection and OCR run locally.
-- The audit log stores a **SHA-256 of the content**, never the content.
-- The dialog defaults to **Cancel** (Enter cancels), stays on top, and an unanswered dialog cancels.
-- The host writes nothing to stdout except protocol messages (stdout is redirected for the session) and logs to a file, so a stray print can't corrupt the channel.
+- The proxy listens on `127.0.0.1` only.
+- The CA is generated per PC, the key never leaves it, it's used only for the hosts above, and it's removable from the app.
+- System changes (certificate trust, PAC routing) are started only by the user, explained in the window, and reversible; the previous proxy setting is backed up and restored.
+- Inspection is local; the audit log stores hashes, not content.

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
-import os
-import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -110,56 +106,3 @@ def test_corrupt_pdf_is_reported_not_crashed():
 def test_unsupported_binary_is_left_alone():
     finding = inspector.inspect_file("archive.zip", b"PK\x03\x04" + b"\x00\x01" * 50)
     assert finding.kind == "unknown" and not finding.detected
-
-
-# ----------------------------------------------------------------------------- host protocol
-
-def run_host(messages: list[dict], answer: str) -> list[dict]:
-    """Talk to `python -m upload_guard.host` exactly like Chrome does."""
-    payload = b"".join(struct.pack("<I", len(b := json.dumps(m).encode())) + b for m in messages)
-    env = {**os.environ, "UPLOAD_GUARD_AUTO_ANSWER": answer, "PYTHONPATH": str(ROOT),
-           "UPLOAD_GUARD_HOME": str(ROOT / ".pytest_cache" / "home")}
-    proc = subprocess.run([sys.executable, "-m", "upload_guard.host"], input=payload, capture_output=True,
-                          env=env, timeout=120)
-    out, replies = proc.stdout, []
-    while out:
-        (n,) = struct.unpack("<I", out[:4])
-        replies.append(json.loads(out[4:4 + n]))
-        out = out[4 + n:]
-    return replies
-
-
-def test_host_ping_and_clean_prompt_need_no_dialog():
-    ping, clean = run_host([{"type": "ping"}, {"type": "inspect_prompt", "site": "ChatGPT", "text": "hello"}],
-                           answer="cancel")
-    assert ping["ok"] and clean["decision"] == "allow"
-
-
-@pytest.mark.parametrize("answer", ["continue", "cancel"])
-def test_host_prompt_with_marker_asks_the_user(answer):
-    (reply,) = run_host([{"type": "inspect_prompt", "site": "ChatGPT", "text": "x WALLED_SENSITIVE y", "id": 7}],
-                        answer=answer)
-    assert reply["decision"] == answer and reply["finding"]["detected"] and reply["id"] == 7
-
-
-def test_host_file_round_trip():
-    data = base64.b64encode((SAMPLES / "sensitive.pdf").read_bytes()).decode()
-    clean = base64.b64encode((SAMPLES / "clean.txt").read_bytes()).decode()
-    flagged, ok = run_host([
-        {"type": "inspect_file", "site": "Perplexity", "name": "sensitive.pdf", "mime": "application/pdf", "data": data},
-        {"type": "inspect_file", "site": "Perplexity", "name": "clean.txt", "mime": "text/plain", "data": clean},
-    ], answer="cancel")
-    assert flagged["decision"] == "cancel" and flagged["finding"]["location"] == "page 2"
-    assert ok["decision"] == "allow"
-
-
-def test_host_too_large_file_asks():
-    (reply,) = run_host([{"type": "inspect_file", "name": "huge.pdf", "mime": "application/pdf",
-                          "size": 80_000_000, "too_large": True}], answer="cancel")
-    assert reply["decision"] == "cancel" and not reply["finding"]["inspected"]
-
-
-def test_host_rejects_bad_requests_without_dying():
-    bad, ping = run_host([{"type": "inspect_file", "name": "x", "data": "!!!not base64"}, {"type": "ping"}],
-                         answer="cancel")
-    assert "error" in bad and ping["ok"]

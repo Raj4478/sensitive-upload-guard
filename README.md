@@ -1,72 +1,76 @@
 # Sensitive Upload Guard
 
-**A lightweight desktop DLP for ChatGPT and Perplexity.** It checks every text prompt and file upload (text, PDF, image) for the marker `WALLED_SENSITIVE` *before* it leaves the browser. When the marker is found, a **native desktop dialog** asks **Continue** or **Cancel**. It also recolours all AI-generated responses on both sites.
+**A standalone desktop DLP for ChatGPT and Perplexity.** It checks every text prompt and file upload (text, PDF, image) the browser sends to chatgpt.com and perplexity.ai for the marker `WALLED_SENSITIVE`, *before it leaves the computer*. When the marker is found, the request is held while a **native desktop dialog** asks **Continue** or **Cancel**. It also recolours AI-generated responses on both sites.
 
-| Native Windows dialog (Task Dialog) | Extension popup |
-| --- | --- |
-| ![Native confirmation dialog](docs/dialog-file.png) | <img src="docs/popup.png" alt="Extension popup" width="260"> |
+**No browser extension, plugin or add-on.** It's one Python desktop application with a local inspecting proxy, the same architecture enterprise DLP tools use.
 
-| On-page notice (live ChatGPT) | AI responses recoloured (ChatGPT, Perplexity) |
+| Desktop app | Native Windows dialog (Task Dialog) |
 | --- | --- |
-| ![Notice after Cancel](docs/notice.png) | ![Recoloured responses](docs/response-colour.png) |
+| <img src="docs/app.png" alt="Upload Guard desktop app" width="330"> | ![Native confirmation dialog](docs/dialog-file.png) |
+
+| AI responses recoloured on ChatGPT and Perplexity (live, through the proxy) |
+| --- |
+| ![Recoloured responses](docs/response-colour.png) |
 
 > **Demo video:** _add link_ · **Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **Demo script:** [docs/DEMO.md](docs/DEMO.md)
 
-## What it does
+## How it works
 
-| Requirement | Behaviour |
+```
+ Chrome / Edge / Firefox  (no extension)
+        │  only chatgpt.com, perplexity.ai and their upload storage (proxy auto-config)
+        ▼
+ ┌─────────────────────────── Upload Guard desktop app (Python) ───────────────────────────┐
+ │  local inspecting proxy (mitmproxy engine, 127.0.0.1)                                    │
+ │   • decrypts only the two sites + their upload storage; everything else passes through  │
+ │   • reads each outgoing prompt / file   → text, PDF, OCR for images and scanned pages    │
+ │   • marker found → HOLDS the request → native Continue/Cancel dialog                     │
+ │       Continue → forwarded unchanged      Cancel → answered locally, never leaves the PC │
+ │   • adds a colour stylesheet to the two sites' pages → AI responses recoloured            │
+ │  window: setup, protection on/off, colour, live activity, audit log                      │
+ └──────────────────────────────────────────────────────────────────────────────────────────┘
+        ▼
+ chatgpt.com · perplexity.ai · their file storage
+```
+
+| Requirement | How it is met |
 | --- | --- |
-| Prompt without the marker | Sent as usual. Nothing is intercepted, and there is no delay. |
-| Prompt containing `WALLED_SENSITIVE` | Native dialog: "text prompt … ChatGPT/Perplexity", with the prompt text |
-| Text / PDF / image file containing the marker | Native dialog **before upload**, naming the file, its type and where the marker was found (e.g. *page 2*, *image text (OCR)*) |
-| **Continue** | The original prompt or file goes through unchanged, exactly as the user sent it |
-| **Cancel** | Nothing is sent. The prompt stays in the box to edit or resend; the file input is emptied so the user can pick again. With several files, only the flagged ones are removed. |
-| AI responses | Recoloured on both sites (colour configurable). The user's own messages are left as they are. |
+| Standalone desktop application | A Python/Tk desktop app. Nothing is installed in the browser. |
+| Inspect prompts **before** they are sent | Every send request (`POST`) to the two sites is read and held at the proxy until a decision |
+| Inspect file uploads before they are transmitted | The upload request's bytes (multipart, or a raw upload to the site's cloud storage) are inspected before being forwarded |
+| Text, PDF and image files | Text decoding, PDF text layer (`pypdf`), and the OS's own OCR (Windows.Media.Ocr / Apple Vision) for images **and scanned PDF pages** |
+| Native dialog, says prompt vs file, shows the prompt or file name | Windows Task Dialog: "Sensitive content in a text prompt / in a file", with the prompt text, or the file name, type and where the marker was found |
+| No marker: no interaction | Clean requests pass straight through; the user sees nothing |
+| **Continue** | The original request is forwarded byte-for-byte |
+| **Cancel** | The request is answered locally (403) and never leaves the PC. Both sites keep the prompt in the box, so the user can edit and resend. |
+| Recolour AI responses on both sites | A small stylesheet is added to the two sites' HTML as it passes through the proxy. The user's own messages are left unchanged. |
+| Don't interfere with normal browsing | A proxy auto-config file sends **only** the two sites (and their upload storage) to Upload Guard; everything else goes direct. Even within that, only those hosts are decrypted. |
 
-Uploads are covered whichever way they happen: the **file picker**, **drag and drop** and **pasting** a file or screenshot.
+**Also handled:** Perplexity's analytics beacon repeats the prompt text, and so do tracking calls on both sites. Those never open a dialog; they're **dropped unless the user already approved that exact text**, so a cancelled prompt can't leak through telemetry either.
 
-Detection tolerates real-world noise: case, `WALLED SENSITIVE`, a marker split across lines in a PDF, and OCR misreads such as `WA11ED_SENS1TIVE`. PDFs are read from their text layer; **scanned pages and images are OCR'd with the operating system's own engine**, so nothing extra needs installing on Windows 10/11 or macOS.
+## Setup (Windows 10/11)
 
-## How it works (short)
-
-```
- chatgpt.com / perplexity.ai tab
- ┌──────────────────────────────────┐   chrome.runtime    ┌──────────────┐  native messaging  ┌────────────────────────────┐
- │ content.js (sensor)              │ ──────────────────► │ background.js│ ─────────────────► │ upload_guard desktop app   │
- │ holds Enter / Send / file events │ ◄────────────────── │ (relay)      │ ◄───────────────── │ • text / PDF / OCR reading │
- │ replays or drops them            │   allow|continue|   └──────────────┘   stdin/stdout     │ • marker detection         │
- │ responses.css recolours answers  │   cancel                                JSON            │ • native Win32/macOS dialog│
- └──────────────────────────────────┘                                                          │ • audit log                │
-                                                                                               └────────────────────────────┘
-```
-
-The extension is only a sensor. All inspection, OCR and the dialog live in the Python desktop app. The full design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Setup (Windows 10/11; Chrome, Edge or Brave)
-
-Requirements: **Python 3.10+**.
+Requires **Python 3.12+**.
 
 ```bash
 git clone https://github.com/Raj4478/sensitive-upload-guard.git
 cd sensitive-upload-guard
+python -m venv .venv
+.venv\Scripts\activate
 python -m pip install -r requirements.txt
+python -m upload_guard
 ```
 
-**1. Register the desktop app with your browsers.** This writes a per-user registry entry; no admin rights are needed.
+The Upload Guard window opens and starts its inspection engine. Then follow the two setup steps in the window. **Each is started by you, and each can be undone from the same button:**
 
-```bash
-python -m upload_guard install
-```
+1. **Install certificate.** Upload Guard creates its own certificate authority on first run (*"Upload Guard local inspection CA"*, unique to this PC; the key never leaves it). Click **Install certificate** and confirm Windows' security prompt. It's stored for your user only (no admin rights).
+2. **Turn protection on.** This sets your user's *automatic proxy configuration* to Upload Guard's local PAC file, which sends only ChatGPT, Perplexity and their upload storage through it. Chrome, Edge and Firefox pick it up immediately. **Turn protection off**, or closing the app, restores your previous setting exactly.
 
-**2. Load the extension:** open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**, click **Load unpacked**, and choose the `extension` folder. Its ID will be `aioadbeodagpdhphhhodimcmfghmadoj`; it's fixed by the key in the manifest, and it's the only extension the desktop app accepts.
+Now use chatgpt.com and perplexity.ai normally in your usual browser.
 
-**3. Check it's connected:** click the shield icon in the toolbar. It should say **"Desktop app connected"**. You can also change the response colour there.
+**No setup?** Click **Open protected browser**. It opens Chrome or Edge with a separate profile that uses Upload Guard and trusts only its certificate, with no system changes. Chrome shows a notice about a command-line flag in this mode; that's expected.
 
-**4. Try it:** generate the demo files, then use them on chatgpt.com or perplexity.ai. File uploads need a logged-in account on both sites.
-
-```bash
-python samples/make_samples.py
-```
+**Try it** with the sample files in `samples/` (regenerate them with `python samples/make_samples.py`):
 
 | File | Expected |
 | --- | --- |
@@ -76,71 +80,57 @@ python samples/make_samples.py
 | `sensitive.png` | dialog, found in *image text (OCR)* |
 | `sensitive-scanned.pdf` | dialog, found in *page 1 image (OCR)* |
 
-### macOS (and Linux)
-
-Homebrew's Python refuses system-wide `pip install` ("externally-managed-environment", [PEP 668](https://peps.python.org/pep-0668/)), so use a virtual environment. **Run `install` from inside it**: the browser launcher is pinned to the Python that runs `install`, and that one has `pypdf` and Pillow.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 -m upload_guard install
-```
-
-Don't use `--break-system-packages`; it can damage the Homebrew Python. On macOS, `install` registers Chrome, Edge, Brave, Chromium and Arc if they're installed. Keep Chrome in a normal window, not full screen, so the dialog opens on the same desktop Space.
-
-The macOS build was tested on a MacBook Air (macOS 26, Homebrew Python 3.14, Chrome): ChatGPT prompts, Continue/Cancel, uploads and Vision OCR work end to end. The inspection engine also passes the full test suite on CI's macOS runner. See the known issue below for Perplexity on macOS.
-
-On a network with broken IPv6, `pip` can hang; force IPv4 for that one install:
-
-```bash
-python3 -c "import socket,runpy,sys;o=socket.getaddrinfo;socket.getaddrinfo=lambda *a,**k:[x for x in o(*a,**k) if x[0]==socket.AF_INET];sys.argv=['pip','install','-r','requirements.txt'];runpy.run_module('pip',run_name='__main__')"
-```
-
-**Updating an existing install:**
-
-```bash
-git pull
-source .venv/bin/activate      # macOS/Linux
-python3 -m pip install -r requirements.txt
-python3 -m upload_guard install
-```
-
-Then reload the extension in `chrome://extensions`, and reload any open ChatGPT or Perplexity tabs.
-
-### Useful commands
+### Other commands
 
 ```bash
 python -m upload_guard check samples/sensitive.pdf   # inspect files from the terminal
 python -m upload_guard dialog-test                   # show the native dialog once
-python -m upload_guard uninstall                     # remove the browser registration
+python -m upload_guard browser                       # open a protected browser window
+python -m upload_guard proxy                         # run the engine without the window
 ```
 
-**Settings:** `%APPDATA%\UploadGuard\config.json`:
+**Settings:** `%APPDATA%\UploadGuard\config.json` (colour, dialog timeout, `unreadable_policy`: `ask`/`allow`/`block`, ports). **Logs and audit trail:** `%APPDATA%\UploadGuard\logs\` and `audit.log`. The audit log records a SHA-256 hash, never the content.
 
-- `dialog_timeout_seconds` (default 120). An unanswered dialog cancels.
-- `unreadable_policy`: `ask` (default), `allow` or `block`. This applies to supported files that couldn't be read, e.g. a password-protected PDF.
-- `audit_log` (default true).
+**Uninstall:** in the app, click **Turn protection off**, then **Remove** (certificate). Then delete `%APPDATA%\UploadGuard`.
 
-**Logs and audit trail:** `%APPDATA%\UploadGuard\logs\host.log` and `audit.log`. The audit log records a SHA-256 hash, never the content.
+### macOS
+
+Use a virtual environment (Homebrew Python refuses system-wide pip):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m upload_guard
+```
+
+**Install certificate** adds the CA to your login keychain (macOS asks for your password). For routing, set *System Settings → Network → (your network) → Proxies → Automatic proxy configuration* to the URL the app shows. Or use **Open protected browser**, which needs no setup. The inspection engine, including Apple Vision OCR, passes the full test suite on macOS in CI; the end-to-end run was done on Windows.
 
 ## Tests
 
 ```bash
-python -m pytest -q          # 32 tests: detection, text/PDF/OCR extraction, host protocol
-cd tests/e2e && npm install && node run.mjs --live   # 23 browser tests, real Chrome + real dialogs
+python -m pytest -q                                   # 47 tests: detection, extraction/OCR, request parsing,
+                                                      # site rules, decisions, the proxy add-on, the local CA
+cd tests/e2e && npm install && node run.mjs --live    # 18 end-to-end tests through the real proxy
 ```
 
-The browser test loads the extension into real Chrome. It drives a local copy of a chat page **and the live ChatGPT and Perplexity sites**, and clicks the real native dialog through Win32. Latest result: **23/23 passed** ([tests/e2e/e2e-results.txt](tests/e2e/e2e-results.txt)).
+The end-to-end test starts the real proxy and drives **real Chrome** through it, with no extension and no system changes. It runs against a local test site (prompts, multipart and raw storage uploads, tracking beacons, all seven sample files) **and the live ChatGPT and Perplexity sites**, and clicks the real native dialog through Win32. Latest result: **18/18 passed** ([tests/e2e/e2e-results.txt](tests/e2e/e2e-results.txt)).
 
-## Limitations and trade-offs
+## Security and privacy
 
-- **The browser half is a Chromium extension** (Chrome, Edge, Brave). A desktop app alone can't see a prompt before the page sends it, and can't cancel it cleanly: HTTPS hides the content, and blocking at the network level leaves the web app in an error state with the text lost. An extension can see it, and keeps "Cancel" harmless. Firefox would need a small port of the manifest.
-- **Site markup changes:** prompt boxes and send buttons are found by accessibility labels and stable `data-` attributes, with fallbacks, never by generated class names. A redesign of either site may still need a selector update; it's all in one list at the top of `content.js`.
-- **Files must come from the page:** uploads through a browser file input, drag and drop or paste are covered. A site using the newer File System Access API (`showOpenFilePicker`) would need an extra hook; neither site uses it today.
-- **OCR quality:** very small, rotated or handwritten text in images may not be read. If OCR fails completely, the file is treated as "could not be checked" and the user is asked (`unreadable_policy`).
-- **Perplexity on macOS (open):** on one Mac, Perplexity showed "Desktop app not reachable" while ChatGPT worked in the same Chrome profile. The desktop app was never started, so the failure is inside Chrome. That notice now includes Chrome's actual error in brackets, and the extension's sender check was relaxed to compare host names instead of origins. Not yet re-tested on that Mac.
-- **Fail-closed by default:** if the desktop app isn't running, uploads and flagged prompts are blocked with an on-page notice (configurable in the popup).
+- **Decrypts only what it must:** the two sites and their upload storage. All other traffic is never routed to Upload Guard, and even routed storage hosts stay encrypted unless a protected site named them.
+- **The local CA is unique to the PC.** Its private key sits in the user's profile and is used only by the local proxy. Removing it is one click.
+- **Upstream certificates are still verified,** so the proxy never weakens the connection to the real sites.
+- **Nothing leaves the PC for inspection:** OCR and parsing are local. The audit log stores hashes, not content.
+- **Fail closed:** if Upload Guard stops while routing is on, the two sites don't load until it runs again, rather than loading unprotected. Closing the app normally turns routing off.
+- **Cancel is the safe default** in the dialog; an unanswered dialog cancels after 120 s.
+
+## Limitations
+
+- **Certificate trust is required** for network-level inspection of HTTPS. This is inherent to the approach (and to every network DLP). The app makes it explicit and reversible.
+- **Apps that pin certificates or use their own network stack** (e.g. native desktop apps) are out of scope; this targets the two web apps in a browser.
+- **Site changes:** detection doesn't depend on page structure (it reads requests), but the recolour stylesheet targets the sites' stable `data-` attributes and may need updating after a redesign.
+- **OCR quality:** very small, rotated or handwritten text may not be read. If OCR fails, the file counts as "could not be checked" and the user is asked.
+- **A previous version** used a browser extension as the sensor. It's kept only as the git tag `extension-version` and isn't part of this application.
 
 ## License
 

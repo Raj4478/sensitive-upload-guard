@@ -1,28 +1,40 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Upload Guard test page</title></head>
+<head><meta charset="utf-8"><title>Upload Guard network test site</title></head>
 <body>
-<!-- Mimics a chat composer: prompt box, send button, file input, drop zone. -->
-<form id="composer" onsubmit="return false">
-  <textarea name="prompt" aria-label="Chat" rows="3" cols="60"></textarea>
-  <button type="button" aria-label="Send message" id="send">Send</button>
-  <input type="file" id="files" multiple>
-</form>
-<div id="drop" style="width:300px;height:80px;border:2px dashed #999">drop here</div>
-<ol id="log"></ol>
+<!-- A tiny chat-like site. Everything it sends goes over the network, through the proxy. -->
+<textarea id="prompt" rows="3" cols="60"></textarea>
+<input type="file" id="file">
+<pre id="out"></pre>
 <script>
-  window.sent = []; window.received = [];
-  const box = document.querySelector('textarea');
-  const send = () => { if (box.value.trim()) { window.sent.push(box.value); box.value = ''; } };
-  document.getElementById('send').addEventListener('click', send);
-  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-  document.getElementById('files').addEventListener('change', (e) => {
-    for (const f of e.target.files) window.received.push('input:' + f.name);
-  });
-  const drop = document.getElementById('drop');
-  drop.addEventListener('dragover', (e) => e.preventDefault());
-  drop.addEventListener('drop', (e) => { e.preventDefault(); for (const f of e.dataTransfer.files) window.received.push('drop:' + f.name); });
-  document.addEventListener('paste', (e) => { for (const f of e.clipboardData.files) window.received.push('paste:' + f.name); });
+  const out = (s) => { document.getElementById('out').textContent += s + '\n'; return s; };
+  // Like Perplexity's ask endpoint: JSON with the prompt.
+  window.sendPrompt = async (text) => {
+    const r = await fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query_str: text, params: { mode: 'concise' } }) });
+    return out('ask ' + r.status);
+  };
+  // Like a presigned S3 POST: multipart with the file and its name.
+  window.uploadMultipart = async () => {
+    const f = document.getElementById('file').files[0];
+    const form = new FormData(); form.append('key', 'uploads/123'); form.append('file', f, f.name);
+    const r = await fetch('/s3-upload', { method: 'POST', body: form });
+    return out('multipart ' + f.name + ' ' + r.status);
+  };
+  // Like ChatGPT: announce name + size, then PUT the raw bytes to a storage URL.
+  window.uploadRaw = async () => {
+    const f = document.getElementById('file').files[0];
+    const meta = await fetch('/api/files', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file_name: f.name, file_size: f.size, use_case: 'my_files' }) }).then((r) => r.json());
+    const r = await fetch(meta.upload_url, { method: 'PUT', headers: { 'content-type': f.type || 'application/octet-stream' }, body: f });
+    return out('raw ' + f.name + ' ' + r.status);
+  };
+  // Like an analytics beacon that repeats what the user typed.
+  window.sendBeacon = async (text) => {
+    const r = await fetch('/rest/event/analytics', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ event_name: 'query_submitted', event_data: { query: text } }) });
+    return out('beacon ' + r.status);
+  };
 </script>
 </body>
 </html>

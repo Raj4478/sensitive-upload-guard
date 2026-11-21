@@ -1,48 +1,42 @@
-# Demo video script (about 5 minutes, Windows)
+# Demo video script (about 5½ minutes, Windows)
 
-The brief asks for the required functionality on **both** ChatGPT and Perplexity. File uploads need a **logged-in** account on both sites, so log in first.
+Show that it's a **standalone desktop app**: no extension anywhere. File uploads need a logged-in account on both sites.
 
 ## Before recording
 
-1. `python -m pip install -r requirements.txt`, then `python -m upload_guard install`.
-2. In `chrome://extensions`: Developer mode → Load unpacked → `extension` folder. Pin the shield icon.
-3. Run `python samples/make_samples.py`, and open the `samples` folder in Explorer so you can drag files from it.
-4. Log in to chatgpt.com and perplexity.ai in two tabs. Turn on Windows Do Not Disturb.
+1. In the project folder: `.venv\Scripts\activate`, then `python -m upload_guard`. In the window, click **Install certificate** (confirm Windows' prompt), then **Turn protection on**. Check that the pill says **Protected**.
+2. In `chrome://extensions`, make sure no Upload Guard extension is loaded (remove the old one if it's there).
+3. Open chatgpt.com and perplexity.ai in your normal Chrome, logged in, and open the `samples` folder in Explorer.
+4. Turn on Do Not Disturb.
 
 ## Scenes and narration
 
-**1. Intro (0:00–0:30)**: show the README diagram.
-> "This is Sensitive Upload Guard, a lightweight desktop DLP. A small browser extension holds each prompt and upload on ChatGPT and Perplexity, and a Python desktop app inspects it for the marker WALLED_SENSITIVE. If it's found, a native Windows dialog asks Continue or Cancel."
+**1. Intro (0:00–0:35)**: show the README diagram.
+> "This is Sensitive Upload Guard, a standalone desktop DLP. There's no browser extension. A local inspecting proxy sees everything my browser sends to ChatGPT and Perplexity, checks it for WALLED_SENSITIVE before it leaves the computer, and asks in a native Windows dialog. It also recolours the AI's answers."
 
-**2. Connected (0:30–0:45)**: click the shield icon.
-> "The popup confirms the desktop app is connected through Chrome's native messaging. Here I can also set the response colour."
+**2. The app (0:35–1:15)**: show the Upload Guard window.
+> "The app starts its inspection engine. The two one-time steps: I trusted its local certificate, which is unique to this PC, and turned protection on. That routes only ChatGPT and Perplexity through it; everything else goes direct. Both are reversible here." Show `chrome://extensions`: "and no extension is installed."
 
-**3. ChatGPT, clean prompt (0:45–1:05)**: type `What is the capital of France?` and press Enter.
-> "A normal prompt goes straight through: no dialog, no delay. And the answer appears in the new colour; that's the response recolouring."
+**3. ChatGPT clean prompt (1:15–1:35)**: `What is the capital of France? Answer in one sentence.`
+> "A clean prompt goes straight through, and the answer is recoloured, injected by the proxy, not an extension."
 
-**4. ChatGPT, sensitive prompt (1:05–1:50)**: type `Summarise this WALLED_SENSITIVE roadmap`, press Enter.
-> "This prompt contains the marker. It's held before it's sent, and a native Windows dialog appears. It says it's a text prompt on ChatGPT and shows the prompt." Click **Cancel**. "Cancel: nothing was sent, and my text is still in the box." Press Enter again, click **Continue**. "Continue sends the original prompt unchanged."
+**4. ChatGPT sensitive prompt (1:35–2:20)**: `Summarise this roadmap: WALLED_SENSITIVE Project Falcon launches in March.`
+> "The send request is held at the proxy, and a native Task Dialog shows the prompt." **Cancel**. "It never left the PC, and ChatGPT keeps my text in the box." Press Enter again, then **Continue**. "Continue forwards the original request unchanged."
 
-**5. ChatGPT, files (1:50–2:50)**
-- Attach `clean.pdf`. "Clean file: uploads normally."
-- Attach `sensitive.txt`, then Cancel. "Text file with the marker: the dialog names the file. Cancel, and it's not attached."
-- Attach `sensitive.pdf`, then Continue. "PDF: found on page 2. Continue uploads it unchanged."
-- Drag `sensitive.png` into the chat, then Cancel. "Image: the text is read with Windows' built-in OCR. Drag-and-drop is covered too."
+**5. ChatGPT files (2:20–3:20)**
+- `clean.pdf`: "uploads with no dialog."
+- `sensitive.txt`, then **Cancel**: "the upload bytes were inspected before transmission; blocked."
+- `sensitive.pdf`, then **Continue**: "found on page 2; uploaded unchanged."
+- Drag `sensitive.png` in, then **Cancel**: "text inside an image, read with Windows OCR."
 
-**6. Perplexity (2:50–4:10)**: repeat briefly:
-- a clean prompt, and point out the recoloured answer
-- `WALLED_SENSITIVE` prompt → Cancel → Continue
-- `sensitive-scanned.pdf` → dialog "page 1 image (OCR)" → Cancel ("a scanned PDF with no text layer")
-- `clean.png` → uploads with no dialog
+**6. Perplexity (3:20–4:30)**: a clean prompt (recoloured answer); a `WALLED_SENSITIVE` prompt with **Continue**; `sensitive-scanned.pdf` with **Cancel** ("a scanned PDF, page 1 image"); `clean.png` with no dialog.
 
-**7. Under the hood (4:10–4:50)**
-- Run `python -m upload_guard check samples\*`. "The same engine from the terminal."
-- Open `%APPDATA%\UploadGuard\audit.log`. "Every decision is logged with a hash, never the content."
-- Optionally, run `node run.mjs --live` results. "23 automated browser tests against the live sites, all passing."
+**7. Activity and the hidden leak (4:30–5:10)**: show the app's activity list and counts.
+> "Every decision is logged, with only a hash of the content. One thing a page-level tool would miss: Perplexity's analytics beacon also carries the prompt text. Upload Guard drops those unless I approved that exact text, so a cancelled prompt can't leak through telemetry either."
 
-**8. Close (4:50–5:00)**
-> "The code, setup and architecture notes are on GitHub. Thanks for watching."
+**8. Close (5:10–5:30)**: click **Turn protection off**, and show the tests passing (`python -m pytest -q`, and `tests/e2e/e2e-results.txt`).
+> "Turning protection off restores my previous settings. Code, tests and architecture are on GitHub. Thanks for watching."
 
 ## Upload
 
-YouTube **Unlisted**, or Google Drive "Anyone with the link". Open the link in a private window to confirm it plays **without signing in**; the brief counts sign-in-gated links as not submitted.
+YouTube **Unlisted**, or Google Drive "Anyone with the link". Check it plays in an Incognito window, with no sign-in.

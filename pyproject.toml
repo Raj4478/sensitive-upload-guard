@@ -5,17 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sensitive-upload-guard"
 version = "1.0.0"
-description = "Lightweight desktop DLP for ChatGPT and Perplexity: native Continue/Cancel dialog for WALLED_SENSITIVE prompts and uploads."
+description = "Standalone desktop DLP for ChatGPT and Perplexity: a local inspecting proxy with a native Continue/Cancel dialog for WALLED_SENSITIVE prompts and uploads."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = ["pypdf>=4.0", "pillow>=10"]
+dependencies = ["pypdf>=4.0", "pillow>=10", "mitmproxy>=11.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[project.scripts]
+upload-guard = "upload_guard.__main__:main"
+
 [tool.setuptools.packages.find]
 include = ["upload_guard*"]
+
+[tool.setuptools.package-data]
+upload_guard = ["assets/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
