@@ -79,7 +79,28 @@ def _notify_windows() -> None:
     wininet.InternetSetOptionW(None, 37, None, 0)   # INTERNET_OPTION_REFRESH
 
 
+MAC_ROUTING_STEPS = ("On macOS, turn routing on yourself (one time):\n\n"
+                     "System Settings > Network > your network (e.g. Wi-Fi) > Details > Proxies >\n"
+                     "turn on \"Automatic proxy configuration\" and set the URL to:\n\n{url}\n\n"
+                     "Click OK. To turn protection off, switch that option off again.")
+
+
+def _mac_auto_proxy_url() -> str | None:
+    """The automatic proxy configuration URL macOS is using right now (read-only)."""
+    result = _run(["scutil", "--proxy"])
+    enabled = url = None
+    for line in result.stdout.splitlines():
+        key, _, value = line.strip().partition(" : ")
+        if key == "ProxyAutoConfigEnable":
+            enabled = value.strip() == "1"
+        elif key == "ProxyAutoConfigURLString":
+            url = value.strip()
+    return url if enabled else None
+
+
 def routing_enabled(pac_url: str) -> bool:
+    if sys.platform == "darwin":
+        return _mac_auto_proxy_url() == pac_url
     if sys.platform != "win32":
         return False
     import winreg
@@ -91,8 +112,10 @@ def routing_enabled(pac_url: str) -> bool:
 
 
 def enable_routing(pac_url: str) -> tuple[bool, str]:
+    if sys.platform == "darwin":
+        return False, MAC_ROUTING_STEPS.format(url=pac_url)
     if sys.platform != "win32":
-        return False, "On macOS set System Settings > Network > Proxies > Automatic proxy configuration to " + pac_url
+        return False, "Set your system's automatic proxy configuration URL to " + pac_url
     import winreg
     backup = app_dir() / "previous-proxy.json"
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
@@ -108,6 +131,9 @@ def enable_routing(pac_url: str) -> tuple[bool, str]:
 
 
 def disable_routing(pac_url: str) -> tuple[bool, str]:
+    if sys.platform == "darwin":
+        return False, ("On macOS: System Settings > Network > your network > Details > Proxies > "
+                       "switch off \"Automatic proxy configuration\".")
     if sys.platform != "win32":
         return False, "not supported on this OS"
     import winreg

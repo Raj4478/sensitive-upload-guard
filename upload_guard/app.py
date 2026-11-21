@@ -205,6 +205,14 @@ class App:
         self._set_step(self.step_route, routed, "ChatGPT and Perplexity only" if routed else "off",
                        button_text="Turn protection off" if routed else "Turn protection on")
         self.step_route["button"].configure(state="normal" if (cert or routed) else "disabled")
+        if sys.platform == "darwin" and not getattr(self, "_mac_poll", False):
+            # On macOS the user turns routing on in System Settings: keep the status current.
+            self._mac_poll = True
+
+            def poll():
+                self.refresh()
+                self.root.after(4000, poll)
+            self.root.after(4000, poll)
         if engine and cert and routed:
             self.pill.configure(text="  ●  Protected  ", bg="#065f46")
         elif engine:
@@ -260,9 +268,13 @@ class App:
 
     def on_toggle_routing(self) -> None:
         if system.routing_enabled(self.pac_url):
-            system.disable_routing(self.pac_url)
+            ok, message = system.disable_routing(self.pac_url)
         else:
-            system.enable_routing(self.pac_url)
+            ok, message = system.enable_routing(self.pac_url)
+        if not ok:
+            # macOS: the user flips the setting in System Settings; show exactly how.
+            from tkinter import messagebox
+            messagebox.showinfo("Upload Guard", message, parent=self.root)
         self.refresh()
 
     def on_open_browser(self) -> None:
