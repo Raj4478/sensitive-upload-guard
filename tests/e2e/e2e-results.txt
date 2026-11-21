@@ -1,0 +1,24 @@
+PASS  clean prompt sends with no dialog
+PASS  marker prompt shows the native dialog (prompt)  -- Cancel
+PASS  Cancel: prompt not sent, text kept in the box
+PASS  Continue (send button): original prompt sent unchanged
+PASS  clean file uploads with no dialog
+PASS  sensitive.txt: dialog names the file, cancel -> blocked  -- Found in: text
+PASS  sensitive.txt: Cancel empties the file input so the user can pick again  -- 0 file(s) left
+PASS  sensitive.pdf: dialog names the file, cancel -> blocked  -- Found in: page 2
+PASS  sensitive.pdf: Cancel empties the file input so the user can pick again  -- 0 file(s) left
+PASS  sensitive.png: dialog names the file, continue -> uploaded  -- Found in: image text (OCR)
+PASS  sensitive-scanned.pdf: dialog names the file, continue -> uploaded  -- Found in: page 1 image (OCR)
+PASS  multi-file: Cancel drops only the flagged file  -- input:clean.pdf
+PASS  drag-and-drop: dialog, Continue -> dropped file reaches the page
+PASS  paste: dialog, Cancel -> pasted file never reaches the page
+PASS  ChatGPT: marker prompt -> native dialog; Cancel keeps text  -- Cancel
+PASS  ChatGPT: Continue sends; AI response recoloured  -- rgb(14, 165, 233)
+PASS  ChatGPT: the user's own question keeps its colour  -- rgb(218, 230, 253)
+PASS  Perplexity: marker prompt -> native dialog; Cancel keeps text  -- Cancel
+PASS  Perplexity: Continue sends; AI response recoloured  -- rgb(14, 165, 233)
+PASS  Perplexity: the user's own question keeps its colour  -- rgb(219, 222, 227)
+PASS  Perplexity live upload: flagged PDF -> dialog; Cancel -> site never receives it
+PASS  Perplexity live upload: clean PDF -> no dialog, site receives it
+
+22/22 passed

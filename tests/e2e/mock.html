@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Upload Guard test page</title></head>
+<body>
+<!-- Mimics a chat composer: prompt box, send button, file input, drop zone. -->
+<form id="composer" onsubmit="return false">
+  <textarea name="prompt" aria-label="Chat" rows="3" cols="60"></textarea>
+  <button type="button" aria-label="Send message" id="send">Send</button>
+  <input type="file" id="files" multiple>
+</form>
+<div id="drop" style="width:300px;height:80px;border:2px dashed #999">drop here</div>
+<ol id="log"></ol>
+<script>
+  window.sent = []; window.received = [];
+  const box = document.querySelector('textarea');
+  const send = () => { if (box.value.trim()) { window.sent.push(box.value); box.value = ''; } };
+  document.getElementById('send').addEventListener('click', send);
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  document.getElementById('files').addEventListener('change', (e) => {
+    for (const f of e.target.files) window.received.push('input:' + f.name);
+  });
+  const drop = document.getElementById('drop');
+  drop.addEventListener('dragover', (e) => e.preventDefault());
+  drop.addEventListener('drop', (e) => { e.preventDefault(); for (const f of e.dataTransfer.files) window.received.push('drop:' + f.name); });
+  document.addEventListener('paste', (e) => { for (const f of e.clipboardData.files) window.received.push('paste:' + f.name); });
+</script>
+</body>
+</html>

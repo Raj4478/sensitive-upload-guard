@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Sensitive Upload Guard",
+  "version": "1.0.0",
+  "description": "Checks prompts and file uploads on ChatGPT and Perplexity for WALLED_SENSITIVE and asks before sending. Colours AI responses.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3RNWHVdtl5uVJd9aPzFCwYkBVxzDJFyGjWVVdLn1Dp4xcrA3rrqUepaYu8uMLt2rJWViMfHfKganFGxJBJ9PvqsipPE+PZ8WRO7rxXfgEHjLyMqocZznsMoVfzcgUza16Oaj9uXEzIdGxCY133iVPk3LpB64OQBZ1ZZV34ujpmEiBEii4D98wGlO0uE4caMAQFm+51D7IeeRZdKPcNTyQgjVicwR+7wRaHrHcoohesm/jVe0nWs71V/eJq01ufbkPvUwTrxx8RjaXQZPfnczeG38xROD8VjDP4U2Bd9p14iZcusM50zSMWxqoptWiFFV8AHYSC0upo+coE7dYUpk6QIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://www.perplexity.ai/*",
+    "https://perplexity.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*"
+      ],
+      "js": [
+        "page_hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "responses.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sensitive Upload Guard",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "options_page": "popup.html",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}
