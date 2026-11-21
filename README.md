@@ -76,7 +76,7 @@ python samples/make_samples.py
 | `sensitive.png` | dialog, found in *image text (OCR)* |
 | `sensitive-scanned.pdf` | dialog, found in *page 1 image (OCR)* |
 
-macOS and Linux use the same steps: `install` writes the host manifest into each browser's `NativeMessagingHosts` folder. The macOS dialog (osascript) and OCR (Vision framework) code paths are included but were **not tested** for this submission; only Windows was.
+macOS and Linux use the same steps (use `python3` on macOS): `install` writes the host manifest into each browser's `NativeMessagingHosts` folder. On macOS, the inspection engine, including **Vision-framework OCR**, passes the full test suite in CI (macOS runner, Python 3.10 and 3.13). The macOS dialog (`osascript`) and the browser registration were not tried on a physical Mac; the full end-to-end run was done on Windows.
 
 ### Useful commands
 
