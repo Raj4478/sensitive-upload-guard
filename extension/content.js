@@ -62,6 +62,11 @@
 
   /** "allow" | "continue" -> go ahead; anything else -> stop. */
   function verdict(reply, what) {
+    if (reply && reply.error && /context invalidated|Receiving end does not exist/i.test(reply.error)) {
+      // The extension was reloaded/updated after this tab opened; this copy is cut off.
+      toast('blocked', 'Upload Guard was updated', `Reload this page (F5) to finish updating. The ${what} was not sent.`);
+      return false;
+    }
     if (!reply || reply.error) {
       const allow = settings.failMode === 'allow';
       if (allow) toast('info', 'Desktop app not reachable', `The ${what} was allowed (fail-open setting).`);
