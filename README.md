@@ -2,9 +2,13 @@
 
 **A lightweight desktop DLP for ChatGPT and Perplexity.** It checks every text prompt and file upload (text, PDF, image) for the marker `WALLED_SENSITIVE` *before* it leaves the browser. When the marker is found, a **native desktop dialog** asks **Continue** or **Cancel**. It also recolours all AI-generated responses on both sites.
 
-| Native dialog (Windows) | AI responses recoloured (ChatGPT, Perplexity) |
+| Native Windows dialog (Task Dialog) | Extension popup |
 | --- | --- |
-| ![Native confirmation dialog](docs/dialog-file.png) | ![Recoloured responses](docs/response-colour.png) |
+| ![Native confirmation dialog](docs/dialog-file.png) | <img src="docs/popup.png" alt="Extension popup" width="260"> |
+
+| On-page notice (live ChatGPT) | AI responses recoloured (ChatGPT, Perplexity) |
+| --- | --- |
+| ![Notice after Cancel](docs/notice.png) | ![Recoloured responses](docs/response-colour.png) |
 
 > **Demo video:** _add link_ · **Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **Demo script:** [docs/DEMO.md](docs/DEMO.md)
 
@@ -94,10 +98,10 @@ python -m upload_guard uninstall                     # remove the browser regist
 
 ```bash
 python -m pytest -q          # 31 tests: detection, text/PDF/OCR extraction, host protocol
-cd tests/e2e && npm install && node run.mjs --live   # 22 browser tests, real Chrome + real dialogs
+cd tests/e2e && npm install && node run.mjs --live   # 23 browser tests, real Chrome + real dialogs
 ```
 
-The browser test loads the extension into real Chrome. It drives a local copy of a chat page **and the live ChatGPT and Perplexity sites**, and clicks the real native dialog through Win32. Latest result: **22/22 passed** ([tests/e2e/e2e-results.txt](tests/e2e/e2e-results.txt)).
+The browser test loads the extension into real Chrome. It drives a local copy of a chat page **and the live ChatGPT and Perplexity sites**, and clicks the real native dialog through Win32. Latest result: **23/23 passed** ([tests/e2e/e2e-results.txt](tests/e2e/e2e-results.txt)).
 
 ## Limitations and trade-offs
 

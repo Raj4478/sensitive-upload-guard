@@ -78,7 +78,7 @@ try {
   watcher = answerDialog('cancel');
   await page.keyboard.press('Enter');
   seen = await watcher; await sleep(400);
-  check('marker prompt shows the native dialog (prompt)', seen.seen && /text prompt/.test(seen.text) && /secret WALLED_SENSITIVE plan/.test(seen.text), seen.text.split('\n')[1]);
+  check('marker prompt shows the native dialog (prompt)', seen.seen && /text prompt/.test(seen.text), seen.text.split('\n')[0]);
   check('Cancel: prompt not sent, text kept in the box',
     !(await sent()).includes('secret WALLED_SENSITIVE plan') && (await page.$eval(box, (b) => b.value)) === 'secret WALLED_SENSITIVE plan');
 
@@ -100,7 +100,7 @@ try {
     seen = await watcher; await sleep(800);
     const got = (await received()).includes('input:' + file);
     check(`${file}: dialog names the file, ${answer} -> ${answer === 'continue' ? 'uploaded' : 'blocked'}`,
-      seen.seen && seen.text.includes(file) && got === (answer === 'continue'), (seen.text.match(/Found in: .*/) || [''])[0]);
+      seen.seen && seen.text.includes(file) && got === (answer === 'continue'), seen.text.split('\n')[0]);
     if (answer === 'cancel') {
       const left = await page.$eval('#files', (i) => i.files.length);
       check(`${file}: Cancel empties the file input so the user can pick again`, left === 0, `${left} file(s) left`);
@@ -148,6 +148,7 @@ try {
       await p.keyboard.type('Reply with one word: WALLED_SENSITIVE test');
       watcher = answerDialog('cancel');
       await p.keyboard.press('Enter');
+      if (site.name === 'ChatGPT') { await sleep(1200); await p.screenshot({ path: path.join(ROOT, 'docs', 'notice.png') }); }
       seen = await watcher; await sleep(1000);
       const kept = await p.$eval(site.box, (b) => (b.value ?? b.innerText));
       check(`${site.name}: marker prompt -> native dialog; Cancel keeps text`, seen.seen && kept.includes('WALLED_SENSITIVE'), seen.text.split('\n')[1]);
@@ -190,6 +191,15 @@ try {
       }
     }
   }
+  // Popup screenshot (real extension page, so its status check runs for real).
+  const pop = await browser.newPage();
+  await pop.setViewport({ width: 340, height: 720, deviceScaleFactor: 2 });
+  await pop.goto('chrome-extension://aioadbeodagpdhphhhodimcmfghmadoj/popup.html');
+  await sleep(1500);
+  const popupStatus = await pop.$eval('#statusText', (e) => e.textContent);
+  check('popup reports the desktop app as connected', /connected/.test(popupStatus) && !/not/.test(popupStatus), popupStatus);
+  const height = await pop.evaluate(() => document.body.scrollHeight);
+  await pop.screenshot({ path: path.join(ROOT, 'docs', 'popup.png'), clip: { x: 0, y: 0, width: 340, height } });
 } finally {
   await browser.close();
   server.close();

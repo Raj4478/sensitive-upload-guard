@@ -64,13 +64,24 @@
   function verdict(reply, what) {
     if (!reply || reply.error) {
       const allow = settings.failMode === 'allow';
-      toast(allow
-        ? `Upload Guard desktop app not reachable - ${what} allowed (fail-open).`
-        : `Upload Guard desktop app not reachable - ${what} blocked. Run: python -m upload_guard install`, !allow);
+      if (allow) toast('info', 'Desktop app not reachable', `The ${what} was allowed (fail-open setting).`);
+      else toast('blocked', 'Desktop app not reachable', `The ${what} was blocked for safety. Run: python -m upload_guard install`);
       console.warn('[Upload Guard]', reply && reply.error);
       return allow;
     }
     return reply.decision === 'allow' || reply.decision === 'continue';
+  }
+
+  // Today's activity, shown in the popup.
+  function bump(changes) {
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      chrome.storage.local.get({ stats: null }, ({ stats }) => {
+        const s = stats && stats.day === day ? stats : { day, checked: 0, flagged: 0, blocked: 0 };
+        for (const [key, n] of Object.entries(changes)) s[key] += n;
+        chrome.storage.local.set({ stats: s });
+      });
+    } catch (_) { /* extension reloaded */ }
   }
 
   const replayed = new WeakSet();   // events we dispatch ourselves; let them through
@@ -109,16 +120,19 @@
     if (resending) return;
     if (promptPending) { stop(event); return; }   // a dialog is already open
     const text = composerText(composer);
-    if (!hasMarker(text)) return;                 // clean: the site handles it as usual
+    if (!text.trim()) return;
+    if (!hasMarker(text)) { bump({ checked: 1 }); return; }   // clean: the site handles it as usual
     stop(event);
     promptPending = true;
-    toast('WALLED_SENSITIVE found in your prompt - answer the Upload Guard dialog.');
+    bump({ checked: 1, flagged: 1 });
+    toast('pending', 'Waiting for your decision', 'WALLED_SENSITIVE was found in your prompt. Answer the Upload Guard dialog.');
     ask({ type: 'inspect_prompt', site: SITE, text }).then((reply) => {
       if (verdict(reply, 'prompt')) {
         resend();
-        toast('Prompt sent.');
-      } else if (!reply.error) {
-        toast('Prompt not sent. Your text is still in the box.');
+        toast('success', 'Prompt sent', 'You chose Continue. It was sent unchanged.');
+      } else {
+        bump({ blocked: 1 });
+        if (!reply.error) toast('blocked', 'Prompt not sent', 'Your text is still in the box, ready to edit.');
         composer.focus();
       }
     }).finally(() => { promptPending = false; });
@@ -173,23 +187,35 @@
     });
   }
 
+  /** Resolve to { ok, flagged } for one file. */
   async function checkFile(file) {
-    const base = { type: 'inspect_file', site: SITE, name: file.name || 'pasted file', mime: file.type, size: file.size };
-    if (file.size > MAX_BYTES) return verdict(await ask({ ...base, too_large: true }), `"${base.name}"`);
-    let data;
-    try { data = await readBase64(file); } catch (e) { return verdict({ error: `could not read ${base.name}` }, 'file'); }
-    return verdict(await ask({ ...base, data }), `"${base.name}"`);
+    const name = file.name || 'pasted file';
+    const base = { type: 'inspect_file', site: SITE, name, mime: file.type, size: file.size };
+    let reply;
+    if (file.size > MAX_BYTES) {
+      reply = await ask({ ...base, too_large: true });
+    } else {
+      try { reply = await ask({ ...base, data: await readBase64(file) }); } catch (e) { reply = { error: `could not read ${name}` }; }
+    }
+    const flagged = !!(reply && reply.finding && (reply.finding.detected || !reply.finding.inspected));
+    return { ok: verdict(reply, `file "${name}"`), flagged };
   }
 
   /** Inspect every file; resolve to the files that may be uploaded. */
   async function allowedFiles(files) {
-    const slow = setTimeout(() => toast(`Upload Guard is checking ${files.length > 1 ? files.length + ' files' : '"' + files[0].name + '"'}…`), 500);
+    const label = files.length > 1 ? `${files.length} files` : files[0].name;
+    const slow = setTimeout(() => toast('pending', 'Checking before upload', `Upload Guard is inspecting ${label}…`), 400);
     try {
       const results = await Promise.all(files.map(checkFile));
-      const allowed = files.filter((_, i) => results[i]);
-      if (allowed.length < files.length) {
-        toast(allowed.length ? `${files.length - allowed.length} file(s) removed from the upload.` : 'Upload cancelled.');
-      }
+      clearTimeout(slow);
+      const allowed = files.filter((_, i) => results[i].ok);
+      const flagged = results.filter((r) => r.flagged).length;
+      const blocked = files.length - allowed.length;
+      bump({ checked: files.length, flagged, blocked });
+      if (blocked && allowed.length) toast('blocked', 'Some files removed', `${blocked} of ${files.length} files were not uploaded.`);
+      else if (blocked) toast('blocked', 'Upload cancelled', files.length > 1 ? 'None of the files were uploaded.' : `${files[0].name} was not uploaded.`);
+      else if (flagged) toast('success', 'Upload allowed', 'You chose Continue. The file was uploaded unchanged.');
+      else hideToast();
       return allowed;
     } finally {
       clearTimeout(slow);
@@ -264,24 +290,68 @@
     });
   }, true);
 
-  // ================================================================= status toast
+  // ================================================================= status notice
+  // A small card at the top of the page, inside a closed shadow root so the
+  // site's CSS cannot touch it (and ours cannot leak into the site).
+  const TOAST_CSS = `
+    :host { all: initial; }
+    .card { position: fixed; z-index: 2147483647; top: 18px; left: 50%; transform: translate(-50%, -12px);
+      display: flex; gap: 12px; align-items: flex-start; width: min(440px, calc(100vw - 32px));
+      padding: 12px 14px 12px 16px; border-radius: 14px; background: #ffffff; color: #0f172a;
+      border: 1px solid rgba(15, 23, 42, .08); border-left: 4px solid var(--tone);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .08);
+      font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+      opacity: 0; transition: opacity .18s ease, transform .18s ease;
+      pointer-events: none; /* information only: clicks pass through to the page */ }
+    .card.show { opacity: 1; transform: translate(-50%, 0); }
+    .icon { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+      background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tone); }
+    .icon svg { width: 16px; height: 16px; }
+    .title { font-weight: 600; font-size: 13.5px; margin: 1px 0 2px; }
+    .msg { color: #475569; overflow-wrap: anywhere; }
+    .brand { margin-left: auto; flex: none; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+      color: #94a3b8; padding-top: 3px; }
+    .spin { animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) {
+      .card { background: #111827; color: #e5e7eb; border-color: rgba(255,255,255,.08); border-left-color: var(--tone);
+        box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+      .msg { color: #9ca3af; } .brand { color: #6b7280; }
+    }`;
+  const SHIELD = '<path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>';
+  const KINDS = {
+    pending: { tone: '#f59e0b', svg: '<circle class="spin" cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="36 14" stroke-linecap="round" style="transform-origin:12px 12px"/>', ms: 0 },
+    success: { tone: '#10b981', svg: SHIELD + '<path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>', ms: 3500 },
+    blocked: { tone: '#f43f5e', svg: SHIELD + '<path d="M9.5 9.5l5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>', ms: 6000 },
+    info: { tone: '#0ea5e9', svg: SHIELD + '<path d="M12 11v5m0-8v.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>', ms: 5000 },
+  };
+  let toastRoot = null;
   let toastHost = null;
   let toastTimer = null;
-  function toast(message, isError = false) {
+
+  function toast(kind, title, message) {
     if (!document.body) return;
     if (!toastHost || !toastHost.isConnected) {
-      toastHost = document.createElement('div');
-      toastHost.attachShadow({ mode: 'open' }).innerHTML =
-        '<style>div{position:fixed;z-index:2147483647;left:50%;bottom:96px;transform:translateX(-50%);' +
-        'max-width:560px;padding:10px 16px;border-radius:10px;font:14px/1.4 system-ui,sans-serif;' +
-        'color:#fff;background:#1f2937;box-shadow:0 6px 24px rgba(0,0,0,.35)}div.err{background:#b91c1c}</style><div></div>';
+      toastHost = document.createElement('upload-guard-notice');
+      toastRoot = toastHost.attachShadow({ mode: 'closed' });
+      toastRoot.innerHTML = `<style>${TOAST_CSS}</style><div class="card" role="status" aria-live="polite">
+        <div class="icon"><svg viewBox="0 0 24 24"></svg></div>
+        <div><div class="title"></div><div class="msg"></div></div><div class="brand">Upload Guard</div></div>`;
       document.body.appendChild(toastHost);
     }
-    const box = toastHost.shadowRoot.querySelector('div');
-    box.textContent = '🛡 ' + message;
-    box.className = isError ? 'err' : '';
-    box.style.display = 'block';
+    const spec = KINDS[kind] || KINDS.info;
+    const card = toastRoot.querySelector('.card');
+    card.style.setProperty('--tone', spec.tone);
+    toastRoot.querySelector('svg').innerHTML = spec.svg;
+    toastRoot.querySelector('.title').textContent = title;
+    toastRoot.querySelector('.msg').textContent = message;
+    requestAnimationFrame(() => card.classList.add('show'));
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { box.style.display = 'none'; }, isError ? 7000 : 4000);
+    if (spec.ms) toastTimer = setTimeout(hideToast, spec.ms);
+  }
+
+  function hideToast() {
+    clearTimeout(toastTimer);
+    if (toastRoot) toastRoot.querySelector('.card').classList.remove('show');
   }
 })();

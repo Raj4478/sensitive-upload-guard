@@ -12,8 +12,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !TYPES.has(message.type)) return false;
   // Only our own content scripts on the two supported sites (or our popup) may ask.
   const origin = sender.origin || (sender.url && new URL(sender.url).origin) || '';
-  const fromPopup = sender.id === chrome.runtime.id && !sender.tab;
-  if (!fromPopup && !/^https:\/\/((www\.)?perplexity\.ai|chatgpt\.com|chat\.openai\.com)$/.test(origin)) {
+  const ownPage = sender.id === chrome.runtime.id && (sender.url || '').startsWith(chrome.runtime.getURL(''));
+  if (!ownPage && !/^https:\/\/((www\.)?perplexity\.ai|chatgpt\.com|chat\.openai\.com)$/.test(origin)) {
     sendResponse({ error: 'sender not allowed' });
     return false;
   }

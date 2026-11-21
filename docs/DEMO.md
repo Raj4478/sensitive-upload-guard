@@ -38,7 +38,7 @@ The brief asks for the required functionality on **both** ChatGPT and Perplexity
 **7. Under the hood (4:10–4:50)**
 - Run `python -m upload_guard check samples\*`. "The same engine from the terminal."
 - Open `%APPDATA%\UploadGuard\audit.log`. "Every decision is logged with a hash, never the content."
-- Optionally, run `node run.mjs --live` results. "22 automated browser tests against the live sites, all passing."
+- Optionally, run `node run.mjs --live` results. "23 automated browser tests against the live sites, all passing."
 
 **8. Close (4:50–5:00)**
 > "The code, setup and architecture notes are on GitHub. Thanks for watching."

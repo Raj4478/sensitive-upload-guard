@@ -53,9 +53,12 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = exit_code or int(finding.detected)
         return exit_code
     if args.command == "dialog-test":
-        choice = dialog.confirm("Sensitive content detected - Upload Guard",
-                                "This is a test of the native confirmation dialog.\n\n"
-                                "Continue: allow the action.\nCancel: block it.", timeout=60)
+        choice = dialog.confirm(dialog.Content(
+            window_title="Upload Guard · test",
+            heading="This is a test of the confirmation dialog",
+            body="When WALLED_SENSITIVE is found in a prompt or file on ChatGPT or Perplexity, "
+                 "this dialog asks before anything is sent.",
+            continue_note="Allow the action", cancel_note="Block the action"), timeout=60)
         print(choice)
         return 0
     if args.command == "host":

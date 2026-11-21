@@ -70,30 +70,34 @@ def _short(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _dialog_text(site: str, finding: inspector.Finding, prompt: str = "") -> tuple[str, str]:
-    title = "Sensitive content detected - Upload Guard"
+def dialog_content(site: str, finding: inspector.Finding, prompt: str = "") -> dialog.Content:
+    """The words in the confirmation dialog for each case."""
     if finding.source == "prompt":
-        body = (f"The text prompt you are sending to {site} contains the sensitive marker {MARKER}.\n\n"
-                f"Prompt:\n\"{_short(prompt, 300)}\"\n\n"
-                "Continue: send the prompt unchanged.\n"
-                "Cancel: do not send it. Your text stays in the box so you can edit it.")
-        return title, body
+        return dialog.Content(
+            window_title="Upload Guard · sensitive text prompt",
+            heading="Sensitive content in a text prompt",
+            body=(f"Your prompt to {site} contains the marker {MARKER}.\n\n"
+                  f"“{_short(prompt, 280)}”"),
+            continue_note="Send the prompt unchanged",
+            cancel_note="Don’t send it. Your text stays in the box so you can edit it.")
     kind = {"text": "text file", "pdf": "PDF", "image": "image"}.get(finding.kind, "file")
     if finding.detected:
-        body = (f"The file you are uploading to {site} contains the sensitive marker {MARKER}.\n\n"
-                f"File: {finding.name}  ({kind})\n"
-                f"Found in: {finding.location}\n"
-                f"\"{_short(finding.snippet, 160)}\"\n\n"
-                "Continue: upload the file unchanged.\n"
-                "Cancel: do not upload it.")
-    else:
-        title = "File could not be checked - Upload Guard"
-        body = (f"Upload Guard could not read the {kind} you are uploading to {site}, so it cannot tell "
-                f"whether it contains {MARKER}.\n\n"
-                f"File: {finding.name}\n"
-                f"Reason: {_short('; '.join(finding.errors), 200)}\n\n"
-                "Continue: upload it anyway.\nCancel: do not upload it.")
-    return title, body
+        return dialog.Content(
+            window_title=f"Upload Guard · sensitive file: {finding.name}",
+            heading="Sensitive content in a file",
+            body=(f"{finding.name} ({kind}) is being uploaded to {site} and contains the marker {MARKER}.\n\n"
+                  f"Found in: {finding.location}\n"
+                  f"“{_short(finding.snippet, 160)}”"),
+            continue_note="Upload the file unchanged",
+            cancel_note="Don’t upload it. You can choose another file.")
+    return dialog.Content(
+        window_title=f"Upload Guard · file could not be checked: {finding.name}",
+        heading="This file could not be checked",
+        body=(f"Upload Guard could not read {finding.name} ({kind}), which is being uploaded to {site}, "
+              f"so it cannot tell whether it contains {MARKER}.\n\n"
+              f"Reason: {_short('; '.join(finding.errors), 200)}"),
+        continue_note="Upload it anyway",
+        cancel_note="Don’t upload it")
 
 
 def handle(request: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -128,8 +132,7 @@ def handle(request: dict[str, Any], settings: Settings) -> dict[str, Any]:
     elif not finding.detected and settings.unreadable_policy != "ask":
         decision = "continue" if settings.unreadable_policy == "allow" else "cancel"
     else:
-        title, body = _dialog_text(site, finding, text)
-        decision = dialog.confirm(title, body, settings.dialog_timeout_seconds)
+        decision = dialog.confirm(dialog_content(site, finding, text), settings.dialog_timeout_seconds)
 
     log.info("%s %s %s -> %s (%s)", site, finding.source, finding.name or "prompt", decision,
              finding.location or ("marker" if finding.detected else "clean"))

@@ -46,7 +46,7 @@ flowchart LR
 | `upload_guard/host.py` | Reads Chrome's message format, runs inspection, applies the policy, shows the dialog, writes the audit log |
 | `upload_guard/extractors.py` | Detects the file type from its first bytes (not its name) and extracts text: decoded text, the PDF text layer (OCR for scanned pages) and image OCR plus metadata |
 | `upload_guard/ocr.py` | The operating system's own OCR: `Windows.Media.Ocr` via PowerShell, the macOS Vision framework via JXA, `tesseract` as fallback |
-| `upload_guard/dialog.py` | Native Continue/Cancel dialog. On Windows: `MessageBoxTimeoutW` with the OK button renamed to "Continue" from a CBT hook; topmost; Cancel is the default button |
+| `upload_guard/dialog.py`, `taskdialog.py` | Native Continue/Cancel dialog. On Windows: a **Task Dialog**, the modern native dialog Windows uses for its own security prompts (warning banner, heading, two command-link buttons with explanations, live auto-cancel countdown), loaded from Common Controls v6 through a runtime activation context. It falls back to `MessageBoxTimeoutW` with the OK button renamed to "Continue". Topmost; Cancel is the default button |
 | `upload_guard/installer.py` | Registers the host for Chrome, Edge, Brave and Chromium (HKCU registry on Windows, `NativeMessagingHosts` folders elsewhere). Only the extension's fixed ID is allowed |
 
 ## 3. Prompt interception

@@ -1,10 +1,10 @@
-"""Native desktop confirmation dialog with exactly two buttons: Continue / Cancel.
+"""Native desktop confirmation dialog with exactly two actions: Continue / Cancel.
 
-* **Windows**: the Win32 ``MessageBox`` (a real system dialog). Windows has no
-  stock "Continue / Cancel" pair, so we open an OK/Cancel box and rename the OK
-  button to "Continue" from a CBT hook the moment the dialog is created.
-  Flags keep it above the browser (``MB_TOPMOST | MB_SETFOREGROUND``); Cancel is
-  the default button so a stray Enter never sends sensitive data.
+* **Windows**: a Task Dialog (taskdialog.py) - the modern native dialog Windows
+  uses for its own security prompts: warning banner, heading, and two command-link
+  buttons with explanations. If it is unavailable, a Win32 ``MessageBox`` whose
+  OK button is renamed to "Continue" from a CBT hook. Both stay on top of the
+  browser, and Cancel is the default so a stray Enter never sends sensitive data.
 * **macOS**: ``display dialog`` via osascript (an NSAlert-style system dialog).
 * **Linux**: ``zenity``; Tk as a last resort.
 
@@ -18,21 +18,43 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
 CONTINUE, CANCEL = "continue", "cancel"
 
 
-def confirm(title: str, message: str, timeout: int = 120) -> str:
+@dataclass
+class Content:
+    """What the dialog says. Rich dialogs use every field; simple ones use plain()."""
+    window_title: str
+    heading: str
+    body: str
+    continue_note: str
+    cancel_note: str
+
+    def plain(self) -> str:
+        return (f"{self.heading}\n\n{self.body}\n\n"
+                f"Continue: {self.continue_note}\nCancel: {self.cancel_note}")
+
+
+def confirm(content: Content, timeout: int = 120) -> str:
     """Show the dialog and return "continue" or "cancel"."""
     # Automated tests set this to answer without a person at the screen.
     scripted = os.environ.get("UPLOAD_GUARD_AUTO_ANSWER")
     if scripted in (CONTINUE, CANCEL):
         log.info("auto-answered %s (UPLOAD_GUARD_AUTO_ANSWER)", scripted)
         return scripted
+    title, message = content.window_title, content.plain()
     try:
         if sys.platform == "win32":
+            try:
+                from upload_guard import taskdialog
+                _dpi_aware()
+                return taskdialog.show(content, timeout)
+            except Exception:
+                log.exception("Task Dialog unavailable; using a message box")
             return _windows(title, message, timeout)
         if sys.platform == "darwin":
             return _mac(title, message, timeout)
@@ -46,16 +68,23 @@ def confirm(title: str, message: str, timeout: int = 120) -> str:
 
 # ----------------------------------------------------------------------------- Windows
 
+def _dpi_aware() -> None:
+    """Crisp text on high-DPI screens."""
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
+
+
 def _windows(title: str, message: str, timeout: int) -> str:
+    """Fallback: a MessageBox with its OK button renamed to Continue."""
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # crisp text on high-DPI screens
-    except Exception:
-        pass
+    _dpi_aware()
 
     LRESULT = ctypes.c_ssize_t
     HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
