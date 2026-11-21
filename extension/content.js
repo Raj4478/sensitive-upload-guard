@@ -69,8 +69,10 @@
     }
     if (!reply || reply.error) {
       const allow = settings.failMode === 'allow';
-      if (allow) toast('info', 'Desktop app not reachable', `The ${what} was allowed (fail-open setting).`);
-      else toast('blocked', 'Desktop app not reachable', `The ${what} was blocked for safety. Run: python -m upload_guard install`);
+      // Show Chrome's own error so "not registered", "stale tab" and "rejected" can be told apart.
+      const why = reply && reply.error ? ` (${String(reply.error).slice(0, 160)})` : '';
+      if (allow) toast('info', 'Desktop app not reachable', `The ${what} was allowed (fail-open setting).${why}`);
+      else toast('blocked', 'Desktop app not reachable', `The ${what} was blocked for safety. Run: python -m upload_guard install${why}`);
       console.warn('[Upload Guard]', reply && reply.error);
       return allow;
     }

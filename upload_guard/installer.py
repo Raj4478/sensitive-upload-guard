@@ -38,6 +38,7 @@ MAC_DIRS = {
     "Edge": "Library/Application Support/Microsoft Edge/NativeMessagingHosts",
     "Brave": "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts",
     "Chromium": "Library/Application Support/Chromium/NativeMessagingHosts",
+    "Arc": "Library/Application Support/Arc/User Data/NativeMessagingHosts",
 }
 LINUX_DIRS = {
     "Chrome": ".config/google-chrome/NativeMessagingHosts",

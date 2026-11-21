@@ -43,7 +43,15 @@ function testExtension() {
   manifest.host_permissions.push('http://localhost:8123/*');
   writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   const bg = path.join(dir, 'background.js');
-  writeFileSync(bg, readFileSync(bg, 'utf8').replace('chatgpt\\.com|chat\\.openai\\.com)$/', 'chatgpt\\.com|chat\\.openai\\.com)$|^http:\\/\\/localhost:8123$/'));
+  // Test copy only: also accept the local test page (plain http on localhost).
+  const patched = readFileSync(bg, 'utf8')
+    .replace('const SITE_HOSTS = [', 'const SITE_HOSTS = [/^localhost$/, ')
+    .replace("if (url.protocol === 'https:') return url.hostname;",
+             "if (url.protocol === 'https:' || url.hostname === 'localhost') return url.hostname;");
+  if (!patched.includes('/^localhost$/') || !patched.includes("url.hostname === 'localhost'")) {
+    throw new Error('test harness: could not patch background.js for the local test page');
+  }
+  writeFileSync(bg, patched);
   return dir;
 }
 

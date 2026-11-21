@@ -87,6 +87,21 @@ def test_marker_in_png_metadata_is_found():
     assert finding.detected and finding.location == "image metadata"
 
 
+def test_scanned_pdf_without_pillow_is_unreadable_not_clean(monkeypatch):
+    """pypdf needs Pillow to extract page images. If that fails, the scanned page
+    must count as "could not be checked" (user is asked), never as clean."""
+    from pypdf import PageObject
+
+    def no_pillow(self):
+        raise ImportError("pillow is required to do image extraction. "
+                          "It can be installed via 'pip install pypdf[image]'")
+
+    monkeypatch.setattr(PageObject, "images", property(no_pillow))
+    finding = inspector.inspect_file("sensitive-scanned.pdf", (SAMPLES / "sensitive-scanned.pdf").read_bytes())
+    assert not finding.detected and not finding.inspected
+    assert any("Pillow" in err for err in finding.errors)
+
+
 def test_corrupt_pdf_is_reported_not_crashed():
     finding = inspector.inspect_file("broken.pdf", b"%PDF-1.4\nnot really a pdf")
     assert not finding.detected and not finding.inspected and finding.kind == "pdf"

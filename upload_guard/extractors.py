@@ -157,7 +157,13 @@ def _extract_pdf(data: bytes, result: Extracted) -> None:
                 result.errors.append(f"page {number}: {exc}")
             result.add(f"page {number}", text)
             if len(text.strip()) < 20 and ocr_budget > 0:   # likely a scanned page
-                for image in _page_images(page):
+                images, image_error = _page_images(page)
+                if image_error:
+                    # Never treat an unreadable scanned page as clean: recording the
+                    # error makes the file "could not be checked", so the user is asked.
+                    result.errors.append(f"page {number}: could not read its images: {image_error}")
+                    ocr_budget = 0
+                for image in images:
                     if ocr_budget <= 0:
                         break
                     ocr_budget -= 1
@@ -173,8 +179,16 @@ def _extract_pdf(data: bytes, result: Extracted) -> None:
         result.errors.append(f"could not read the PDF: {exc}")
 
 
-def _page_images(page) -> list[bytes]:
+def _page_images(page) -> tuple[list[bytes], str]:
+    """The page's embedded images, plus an error message if they could not be read.
+
+    pypdf needs Pillow to decode most image streams. A failure here must be
+    reported, not swallowed: an empty list would look like "this page has no
+    images" and a scanned page with the marker would pass as clean.
+    """
     try:
-        return [img.data for img in page.images]
-    except Exception:
-        return []
+        return [img.data for img in page.images], ""
+    except ImportError:
+        return [], "Pillow is not installed (pip install -r requirements.txt)"
+    except Exception as exc:
+        return [], str(exc) or type(exc).__name__

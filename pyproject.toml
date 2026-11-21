@@ -9,10 +9,10 @@ description = "Lightweight desktop DLP for ChatGPT and Perplexity: native Contin
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["pypdf>=4.0"]
+dependencies = ["pypdf>=4.0", "pillow>=10"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pillow>=10"]
+dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 include = ["upload_guard*"]

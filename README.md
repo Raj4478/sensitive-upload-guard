@@ -76,7 +76,37 @@ python samples/make_samples.py
 | `sensitive.png` | dialog, found in *image text (OCR)* |
 | `sensitive-scanned.pdf` | dialog, found in *page 1 image (OCR)* |
 
-macOS and Linux use the same steps (use `python3` on macOS): `install` writes the host manifest into each browser's `NativeMessagingHosts` folder. On macOS, the inspection engine, including **Vision-framework OCR**, passes the full test suite in CI (macOS runner, Python 3.10 and 3.13). The macOS dialog (`osascript`) and the browser registration were not tried on a physical Mac; the full end-to-end run was done on Windows.
+### macOS (and Linux)
+
+Homebrew's Python refuses system-wide `pip install` ("externally-managed-environment", [PEP 668](https://peps.python.org/pep-0668/)), so use a virtual environment. **Run `install` from inside it**: the browser launcher is pinned to the Python that runs `install`, and that one has `pypdf` and Pillow.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m upload_guard install
+```
+
+Don't use `--break-system-packages`; it can damage the Homebrew Python. On macOS, `install` registers Chrome, Edge, Brave, Chromium and Arc if they're installed. Keep Chrome in a normal window, not full screen, so the dialog opens on the same desktop Space.
+
+The macOS build was tested on a MacBook Air (macOS 26, Homebrew Python 3.14, Chrome): ChatGPT prompts, Continue/Cancel, uploads and Vision OCR work end to end. The inspection engine also passes the full test suite on CI's macOS runner. See the known issue below for Perplexity on macOS.
+
+On a network with broken IPv6, `pip` can hang; force IPv4 for that one install:
+
+```bash
+python3 -c "import socket,runpy,sys;o=socket.getaddrinfo;socket.getaddrinfo=lambda *a,**k:[x for x in o(*a,**k) if x[0]==socket.AF_INET];sys.argv=['pip','install','-r','requirements.txt'];runpy.run_module('pip',run_name='__main__')"
+```
+
+**Updating an existing install:**
+
+```bash
+git pull
+source .venv/bin/activate      # macOS/Linux
+python3 -m pip install -r requirements.txt
+python3 -m upload_guard install
+```
+
+Then reload the extension in `chrome://extensions`, and reload any open ChatGPT or Perplexity tabs.
 
 ### Useful commands
 
@@ -97,7 +127,7 @@ python -m upload_guard uninstall                     # remove the browser regist
 ## Tests
 
 ```bash
-python -m pytest -q          # 31 tests: detection, text/PDF/OCR extraction, host protocol
+python -m pytest -q          # 32 tests: detection, text/PDF/OCR extraction, host protocol
 cd tests/e2e && npm install && node run.mjs --live   # 23 browser tests, real Chrome + real dialogs
 ```
 
@@ -109,6 +139,7 @@ The browser test loads the extension into real Chrome. It drives a local copy of
 - **Site markup changes:** prompt boxes and send buttons are found by accessibility labels and stable `data-` attributes, with fallbacks, never by generated class names. A redesign of either site may still need a selector update; it's all in one list at the top of `content.js`.
 - **Files must come from the page:** uploads through a browser file input, drag and drop or paste are covered. A site using the newer File System Access API (`showOpenFilePicker`) would need an extra hook; neither site uses it today.
 - **OCR quality:** very small, rotated or handwritten text in images may not be read. If OCR fails completely, the file is treated as "could not be checked" and the user is asked (`unreadable_policy`).
+- **Perplexity on macOS (open):** on one Mac, Perplexity showed "Desktop app not reachable" while ChatGPT worked in the same Chrome profile. The desktop app was never started, so the failure is inside Chrome. That notice now includes Chrome's actual error in brackets, and the extension's sender check was relaxed to compare host names instead of origins. Not yet re-tested on that Mac.
 - **Fail-closed by default:** if the desktop app isn't running, uploads and flagged prompts are blocked with an on-page notice (configurable in the popup).
 
 ## License
